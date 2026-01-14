@@ -57,22 +57,15 @@ def create_graph():
 
 
 
-
-graph = create_graph()
-
-
-from IPython.display import Image, display
-display(Image(graph.get_graph().draw_mermaid_png()))
-
-# This is a simple general-purpose chatbot built on top of LangChain and Gradio.
-# Before running this, make sure you have exported your OpenAI API key as an environment variable:
-# export OPENAI_API_KEY="your-openai-api-key"
-
-from langchain_openai import ChatOpenAI  
 from langchain.schema import AIMessage, HumanMessage  
 import gradio as gr
+from langchain.chat_models import init_chat_model
 
-model = ChatOpenAI(model="gpt-4o-mini")
+## ADD TRACKING
+response_model = init_chat_model("gpt-4o", temperature=0)
+grader_model = init_chat_model("gpt-4o", temperature=0)
+
+graph = create_graph()
 
 def predict(message, history):
     history_langchain_format = []
@@ -82,12 +75,16 @@ def predict(message, history):
         elif msg['role'] == "assistant":
             history_langchain_format.append(AIMessage(content=msg['content']))
     history_langchain_format.append(HumanMessage(content=message))
-    gpt_response = model.invoke(history_langchain_format)
+
+    
+    gpt_response = graph.invoke(history_langchain_format)
+
+    
     return gpt_response.content
 
-demo = gr.ChatInterface(
+iface = gr.ChatInterface(
     predict,
     api_name="chat",
 )
 
-demo.launch()
+iface.launch()

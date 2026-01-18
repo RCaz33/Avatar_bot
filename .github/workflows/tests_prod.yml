@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest
+
+    - name: Update and encrypt-data for prod
+      run: python encryption.py  # or bash encrypt-data.sh
+
+    - name: Run tests
+      env:
+        PYTHONPATH: .
+        ENCRYPTION_KEY: ${{ secrets.TEST_ENCRYPTION_KEY }}
+      run: |
+        python -m pytest -v

@@ -1,2 +1,4 @@
 langchain-core
 gradio
+pytest-cov
+pytest

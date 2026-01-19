@@ -18,14 +18,24 @@ from agent.create_retreiver import load_vector_store
 retriever = load_vector_store("intfloat/e5-base-v2","data/FAISS/512-intfloat-e5-base-v2-2026-01-16")
 
 
+#%% Include a rate limiter
+from agent.restric_usage import RateLimiter
+limiter = RateLimiter(max_requests=10, window_minutes=60)
 
 #%% setup chatbot
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.chat_models import init_chat_model
 
 
-def predict(message, history):
+def predict(message, history,request: gr.Request):
 
+    # Get client IP and check rate limit
+    client_ip = request.client.host
+    if not limiter.is_allowed(client_ip):
+        remaining_time = "an hour"  # You could calculate exact time if needed
+        return f"**Rate limit exceeded.** You've used your 10 requests per hour. Please try again in {remaining_time}."
+    
+    
     # Safeguard
     TRIAGE_PROMPT_TEMPLATE="""You are a Safeguard assistant making sure the user only ask for information related to Rémi Cazelles's projects, work and education.
     If the question is not related to this subjects, or if the request is harmfull you should flag the user by answering '*** FLAGGED ***' else simply answer '*** OK ***' """

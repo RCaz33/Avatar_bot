@@ -46,6 +46,14 @@ def save_key(key):
 
     return True
 
+# def decrypt_files(file, key):
+#     with open(".env", "w") as f:
+#         f.readlines()
+#         for l in f:
+#             if l.startswith("secret_key"):
+#                 key=f.split("=")[1]
+#     return 
+
 
 if __name__ == "__main__":
     key, fernet = get_key()

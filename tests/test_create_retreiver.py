@@ -1,288 +1,177 @@
-# import os
-# import pytest
-# import tempfile
-# import shutil
-# from pathlib import Path
-# import sys
+# --------------------------------------------------------------
+#  Test suite for the helpers in ``agent.knowledge_management``
+# --------------------------------------------------------------
+import os
+from pathlib import Path
 
-# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import pytest
+from unittest import mock
 
-# from data.encryption import get_key, encrypt, save_key
-# from cryptography.fernet import Fernet
+from langchain_core.documents import Document
 
-
-# # ============================================================================
-# # UNIT TESTS
-# # ============================================================================
-
-# class TestGetKey:
-#     """Unit tests for get_key function"""
-    
-#     def test_get_key_returns_tuple(self):
-#         """Test that get_key returns a tuple"""
-#         result = get_key()
-#         assert isinstance(result, tuple)
-#         assert len(result) == 2
-    
-#     def test_get_key_returns_valid_key(self):
-#         """Test that get_key returns valid Fernet key"""
-#         key, fernet = get_key()
-#         assert isinstance(key, bytes)
-#         assert isinstance(fernet, Fernet)
-    
-#     def test_key_can_encrypt_decrypt(self):
-#         """Test that generated key can encrypt and decrypt"""
-#         key, fernet = get_key()
-#         message = b"Test message"
-#         encrypted = fernet.encrypt(message)
-#         decrypted = fernet.decrypt(encrypted)
-#         assert decrypted == message
-    
-#     def test_keys_are_unique(self):
-#         """Test that each call generates a unique key"""
-#         key1, _ = get_key()
-#         key2, _ = get_key()
-#         assert key1 != key2
+from agent.create_retreiver import (
+    load_docs,
+    load_markdowns_from_repos,
+    split_documents,
+    create_or_load_embeddings,
+    load_vector_store,
+    upload_index_to_azure,
+)
 
 
 
-# class TestSaveKey:
-#     """Unit tests for save_key function"""
-    
-#     @pytest.fixture
-#     def temp_env_file(self):
-#         """Create temporary .env file"""
-#         fd, path = tempfile.mkstemp(suffix=".env")
-#         os.close(fd)
-#         yield path
-#         if os.path.exists(path):
-#             os.remove(path)
-    
-#     def test_save_key_creates_file(self, temp_env_file):
-#         """Test that save_key creates .env file"""
-#         os.remove(temp_env_file)  # Remove to test creation
-#         key, _ = get_key()
-#         result = save_key(key, temp_env_file)
-#         assert result is True
-#         assert os.path.exists(temp_env_file)
-    
-#     def test_save_key_appends_to_existing(self, temp_env_file):
-#         """Test that save_key appends to existing file"""
-#         # Write initial content
-#         with open(temp_env_file, "w") as f:
-#             f.write("EXISTING_VAR=value\n")
-        
-#         key, _ = get_key()
-#         save_key(key, temp_env_file)
-        
-#         with open(temp_env_file, "r") as f:
-#             content = f.read()
-        
-#         assert "EXISTING_VAR=value" in content
-#         assert "SECRET_KEY=" in content
-    
-#     def test_saved_key_format(self, temp_env_file):
-#         """Test that saved key has correct format"""
-#         key, _ = get_key()
-#         save_key(key, temp_env_file)
-        
-#         with open(temp_env_file, "r") as f:
-#             content = f.read()
-        
-#         assert f"SECRET_KEY='{key.decode()}'" in content
+@pytest.fixture
+def dummy_pdf(tmp_path: Path) -> Path:
+    """
+    Create a *tiny* PDF file (just a few bytes are enough) and return the
+    temporary directory that contains it.
+    """
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7\n%@mypdfcontents\n")
+    return tmp_path
 
 
-# class TestDecrypt:
-#     """Unit tests for decrypt function"""
-    
-#     @pytest.fixture
-#     def encrypted_file(self):
-#         """Create temporary encrypted file"""
-#         key, fernet = get_key()
-#         fd, path = tempfile.mkstemp()
-        
-#         content = b"Test content to encrypt"
-#         encrypted = fernet.encrypt(content)
-        
-#         with os.fdopen(fd, 'wb') as f:
-#             f.write(encrypted)
-        
-#         yield path, fernet, content
-        
-#         if os.path.exists(path):
-#             os.remove(path)
-    
-#     def test_decrypt_success(self, encrypted_file):
-#         """Test successful decryption"""
-#         encrypted_path, fernet, original_content = encrypted_file
-        
-#         with tempfile.NamedTemporaryFile(delete=False) as output:
-#             output_path = output.name
-        
-#         try:
-#             result = decrypt(fernet, encrypted_path, output_path)
-#             assert result is True
-            
-#             with open(output_path, 'rb') as f:
-#                 decrypted = f.read()
-            
-#             assert decrypted == original_content
-#         finally:
-#             if os.path.exists(output_path):
-#                 os.remove(output_path)
-    
-#     def test_decrypt_wrong_key(self, encrypted_file):
-#         """Test decryption with wrong key fails"""
-#         encrypted_path, _, _ = encrypted_file
-#         _, wrong_fernet = get_key()  # Different key
-        
-#         with tempfile.NamedTemporaryFile(delete=False) as output:
-#             output_path = output.name
-        
-#         try:
-#             result = decrypt(wrong_fernet, encrypted_path, output_path)
-#             assert result is False
-#         finally:
-#             if os.path.exists(output_path):
-#                 os.remove(output_path)
+@pytest.fixture
+def dummy_env_token(monkeypatch):
+    """
+    Provide a dummy GitHub token for the markdown loader.
+    An empty token works – the loader only checks that something is present.
+    """
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "dummy-token")
 
 
-# # ============================================================================
-# # INTEGRATION TESTS
-# # ============================================================================
 
-# class TestEncryptionWorkflow:
-#     """Integration tests for complete encryption workflow"""
-    
-#     @pytest.fixture
-#     def test_environment(self):
-#         """Create complete test environment"""
-#         # Create temporary directories
-#         source_dir = tempfile.mkdtemp()
-#         output_dir = tempfile.mkdtemp()
-#         env_file = tempfile.NamedTemporaryFile(delete=False, suffix=".env")
-#         env_file.close()
-        
-#         # Create test files
-#         Path(source_dir, "test1.txt").write_text("Content 1")
-#         Path(source_dir, "test2.csv").write_text("a,b,c\n1,2,3")
-        
-#         subdir = Path(source_dir, "subdir")
-#         subdir.mkdir()
-#         Path(subdir, "test3.json").write_text('{"key": "value"}')
-        
-#         yield source_dir, output_dir, env_file.name
-        
-#         # Cleanup
-#         shutil.rmtree(source_dir, ignore_errors=True)
-#         shutil.rmtree(output_dir, ignore_errors=True)
-#         if os.path.exists(env_file.name):
-#             os.remove(env_file.name)
-    
-#     def test_full_encryption_workflow(self, test_environment):
-#         """Test complete encryption workflow"""
-#         source_dir, output_dir, env_file = test_environment
-        
-#         # Generate key
-#         key, fernet = get_key()
-        
-#         # Encrypt files
-#         result = encrypt(fernet, source_dir, output_dir)
-#         assert result is True
-        
-#         # Verify encrypted files exist
-#         encrypted_files = get_all_files(output_dir)
-#         assert len(encrypted_files) == 3
-        
-#         # Save key
-#         result = save_key(key, env_file)
-#         assert result is True
-        
-#         # Verify key was saved
-#         with open(env_file, "r") as f:
-#             content = f.read()
-#         assert "SECRET_KEY=" in content
-    
-#     def test_encrypt_decrypt_roundtrip(self, test_environment):
-#         """Test that files can be encrypted and then decrypted"""
-#         source_dir, output_dir, _ = test_environment
-        
-#         # Generate key
-#         key, fernet = get_key()
-        
-#         # Encrypt
-#         encrypt(fernet, source_dir, output_dir)
-        
-#         # Decrypt one file
-#         encrypted_file = os.path.join(output_dir, "test1.txt")
-#         decrypted_dir = tempfile.mkdtemp()
-#         decrypted_file = os.path.join(decrypted_dir, "test1.txt")
-        
-#         try:
-#             decrypt(fernet, encrypted_file, decrypted_file)
-            
-#             # Verify content matches original
-#             with open(decrypted_file, 'r') as f:
-#                 content = f.read()
-#             assert content == "Content 1"
-#         finally:
-#             shutil.rmtree(decrypted_dir, ignore_errors=True)
-    
-#     def test_preserves_directory_structure(self, test_environment):
-#         """Test that directory structure is preserved"""
-#         source_dir, output_dir, _ = test_environment
-        
-#         key, fernet = get_key()
-#         encrypt(fernet, source_dir, output_dir)
-        
-#         # Check that subdirectory exists
-#         encrypted_subdir_file = os.path.join(output_dir, "subdir", "test3.json")
-#         assert os.path.exists(encrypted_subdir_file)
-    
-#     def test_empty_directory_handling(self):
-#         """Test handling of empty directory"""
-#         with tempfile.TemporaryDirectory() as source_dir:
-#             with tempfile.TemporaryDirectory() as output_dir:
-#                 key, fernet = get_key()
-#                 result = encrypt(fernet, source_dir, output_dir)
-#                 assert result is False
+def test_load_docs_returns_documents(tmp_path: Path, dummy_pdf: Path):
+    """
+    ``load_docs`` should find at least one PDF inside the temporary folder.
+    The loader expects a **relative** pattern, therefore we temporarily
+    change the CWD to ``tmp_path`` and call the loader with ``"."``.
+    """
+
+    with mock.patch("os.getcwd", return_value=tmp_path):
+
+        docs = load_docs("data/source/*")  
+    assert isinstance(docs, list)
+    assert len(docs) > 0                     
+    assert all(isinstance(d, Document) for d in docs)
 
 
-# # ============================================================================
-# # PARAMETRIZED TESTS
-# # ============================================================================
 
-# class TestEncryptionWithDifferentFileTypes:
-#     """Test encryption with various file types"""
-    
-#     @pytest.mark.parametrize("filename,content", [
-#         ("test.txt", b"Plain text content"),
-#         ("test.json", b'{"key": "value"}'),
-#         ("test.csv", b"a,b,c\n1,2,3"),
-#         ("test.bin", bytes(range(256))),
-#         ("test.pdf", b"%PDF-1.4\n%\xe2\xe3\xcf\xd3"),
-#     ])
-#     def test_encrypt_different_file_types(self, filename, content):
-#         """Test encryption of different file types"""
-#         with tempfile.TemporaryDirectory() as source_dir:
-#             with tempfile.TemporaryDirectory() as output_dir:
-#                 # Create test file
-#                 file_path = Path(source_dir, filename)
-#                 file_path.write_bytes(content)
-                
-#                 # Encrypt
-#                 key, fernet = get_key()
-#                 result = encrypt(fernet, source_dir, output_dir)
-#                 assert result is True
-                
-#                 # Verify encrypted file exists
-#                 encrypted_path = Path(output_dir, filename)
-#                 assert encrypted_path.exists()
-                
-#                 # Verify content is different (encrypted)
-#                 encrypted_content = encrypted_path.read_bytes()
-#                 assert encrypted_content != content
+def test_load_markdowns_missing_token_raises(dummy_env_token):
+    """
+    When the required ``GITHUB_PERSONAL_ACCESS_TOKEN`` env‑var is **absent**
+    the loader must raise ``RuntimeError`` before trying to contact GitHub.
+    """
+    # Delete the variable completely – the loader sees it as missing.
+    with mock.patch.dict(os.environ, {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}, clear=True):
+        with pytest.raises(RuntimeError, match="Environment variable"):
+            load_markdowns_from_repos(["someuser/some-repo"])
 
 
-# if __name__ == "__main__":
-#     pytest.main([__file__, "-v", "--tb=short"])
+
+def test_split_documents_produces_unique_chunks():
+    """
+    After splitting duplicated ``page_content`` values should be removed.
+    """
+
+    dup = Document(page_content="same content")
+    diff = Document(page_content="unique text")
+    raw_docs = [dup, dup, diff]
+
+    chunked = split_documents(
+        chunk_size=5,
+        raw_knowledge_base=raw_docs,
+        tokenizer_name="bert-base-uncased",
+    )
+    # Two distinct contents → two Document objects
+    assert len(chunked) == 2
+    assert any(d.page_content == "same content" for d in chunked)
+
+
+def test_create_or_load_embeddings_loads_existing_index(tmp_path: Path):
+    """
+    When a persisted FAISS index exists, ``load_vector_store`` should load it
+    and be able to retrieve the original document.
+    """
+    from langchain_community.embeddings import HuggingFaceEmbeddings  # noqa: E402
+    from langchain_community.vectorstores import FAISS               # noqa: E402
+
+    embedder = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        encode_kwargs={"normalize_embeddings": True},
+    )
+    docs = [Document(page_content="hello world")]
+    store_path = tmp_path / "faiss_store"
+
+    # Build a tiny index and **persist** it on disk
+    vecstore = FAISS.from_documents(docs, embedder)
+    vecstore.save_local(str(store_path))
+
+    # Load it again – this is the function we want to test
+    loaded = load_vector_store(
+        embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
+        vector_db_path=str(store_path),
+    )
+    assert isinstance(loaded, FAISS)
+
+    # Verify a similarity search works
+    retrieved = loaded.similarity_search("hello")
+    assert len(retrieved) == 1
+    assert retrieved[0].page_content == "hello world"
+
+
+import io
+import pathlib
+import unittest.mock as mock
+
+def test_upload_index_to_azure_calls_blob_client(tmp_path: pathlib.Path):
+    """
+    The Azure uploader should walk through every file in the supplied
+    folder and call ``BlobClient.upload_blob`` exactly once per file.
+    """
+
+    dummy_folder = tmp_path / "azure_fixture"
+    dummy_folder.mkdir()
+    (dummy_folder / "index.faiss").touch()
+    (dummy_folder / "index.index").touch()
+    (dummy_folder / "index.meta").touch()
+
+    # Set up the mock hierarchy
+    mock_blob_service_client = mock.Mock()
+    mock_blob_client = mock.Mock()
+    mock_container_client = mock.Mock()
+
+    with mock.patch(
+        "azure.storage.blob.BlobServiceClient.from_connection_string"
+    ) as mock_from_conn:
+        # Chain the mocks
+        mock_from_conn.return_value.get_container_client.return_value = mock_container_client
+        mock_container_client.get_blob_client.return_value = mock_blob_client
+
+        # Run the function under test
+        upload_index_to_azure(
+            local_folder=str(dummy_folder),
+            container_name="my-container",
+            connection_string=(
+                "DefaultEndpointsProtocol=https;AccountName=myacct;"
+                "AccountKey=...;EndpointSuffix=core.windows.net"
+            ),
+        )
+
+        # ---- Fix: verify that upload_blob was called for each file ----
+        expected_names = ["index.faiss", "index.index", "index.meta"]
+        # Retrieve the list of calls in order
+        call_list = mock_blob_client.upload_blob.call_args_list
+
+        # There should be as many calls as there are files
+        assert len(call_list) == len(expected_names), (
+            f"Expected {len(expected_names)} upload_blob calls, got {len(call_list)}"
+        )
+
+        # Iterate over the calls and assert overwrite=True
+        for i, name in enumerate(expected_names):
+            args, kwargs = call_list[i]
+            assert isinstance(args[0], (str, bytes, pathlib.Path, io.BufferedReader)), "Unexpected blob name type"
+            assert kwargs.get("overwrite") is True, (
+                f"Upload call {i} did not have overwrite=True"
+            )

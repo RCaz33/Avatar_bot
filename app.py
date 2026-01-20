@@ -1,4 +1,4 @@
-
+import gradio as gr
 
 #%% load llm
 from dotenv import load_dotenv
@@ -19,7 +19,7 @@ retriever = load_vector_store("intfloat/e5-base-v2","data/FAISS/512-intfloat-e5-
 
 
 #%% Include a rate limiter
-from agent.restric_usage import RateLimiter
+from agent.restrict_usage import RateLimiter
 limiter = RateLimiter(max_requests=10, window_minutes=60)
 
 #%% setup chatbot

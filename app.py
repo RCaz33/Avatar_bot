@@ -78,11 +78,10 @@ def predict(message, history,request: gr.Request):
     
 
     # RAG tool
-    RAG_PROMPT_TEMPLATE="""Using the information contained in the context,
-                        give a comprehensive answer to the question.
-                        Respond only to the question asked, response should be concise and relevant to the question.
-                        Provide the context source url and context date of the source document when relevant.
-                        If the answer cannot be deduced from the context, do not give an answer.
+    RAG_PROMPT_TEMPLATE="""You will be asked information related to Rémi Cazelles's specific projects, work and education.
+                        Using the information contained in the context, provide a comprehensive answer to the question.
+                        Respond to the question asked with enought details, response should be precise and relevant to the question.
+                        All the information retreive in the context are exclusivelly related to Rémi Cazelles work and education.
                         """
 
 
@@ -106,13 +105,13 @@ def predict(message, history,request: gr.Request):
     )
     
     source_context = "\nSources:\n" + "\n".join([
-        f"{doc.metadata.get('source_url')} ({doc.metadata.get('date')})\n---"
+        f"{doc.metadata.get('source').split('/')[-1]}"
         for i, doc in enumerate(relevant_docs)])
     
     print(gpt_response.content )
     print(source_context)
     
-    return gpt_response.content + source_context
+    return f"{gpt_response.content} + {source_context}"
 
 
 #%% setup tracking

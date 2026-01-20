@@ -22,6 +22,26 @@ retriever = load_vector_store("intfloat/e5-base-v2","data/FAISS/512-intfloat-e5-
 from agent.restrict_usage import RateLimiter
 limiter = RateLimiter(max_requests=10, window_minutes=60)
 
+#%% helper function
+def format_source(doc):
+    """
+    format source according to its path 
+    handles github api, internet page and uploaded files (pdf)
+
+    Args:
+        doc: a langchain Document
+    Returns:
+        str : formated_source from langchain Document"""
+    source = doc.metadata["source"]
+    if 'api.github' in source:
+        return source.split("/blob")[0].replace("api.","")
+    elif "https://" in source:
+        return source
+    elif "data" in source:
+        page_label = doc.metadata["pagpage_labele"]
+        total_page = doc.metadata["total_page"]
+        return f"{source.split("/")[-1]} page({page_label/total_page})"
+    
 #%% setup chatbot
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.chat_models import init_chat_model
@@ -112,8 +132,8 @@ def predict(message, history,request: gr.Request):
         }
     )
     
-    source_context = "\nSources:\n" + "\n".join([
-        f"{doc.metadata.get('source').split('/')[-1]}"
+    source_context = "\nSources:" + "\n".join([
+        f"{format_source(doc)}"
         for i, doc in enumerate(relevant_docs)])
     
     print(gpt_response.content )

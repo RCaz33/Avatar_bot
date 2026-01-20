@@ -1,25 +1,19 @@
-FROM mcr.microsoft.com/devcontainers/python:1-3.11-bookworm
+FROM python:3.12-slim AS builder
 
-WORKDIR /workspace
+# bard setup
+RUN apt-get update && apt-get install -y \
+    git git-lfs ffmpeg libsm6 libxext6 cmake rsync libgl1 curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY packages.txt* requirements.txt* ./
+WORKDIR /app
 
-RUN if [ -f packages.txt ]; then \
-    apt-get update && \
-    apt-get upgrade -y && \
-    xargs apt-get install -y < packages.txt && \
-    rm -rf /var/lib/apt/lists/*; \
-    fi
+# install without gpu
+RUN pip install --no-cache-dir -U pip
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
 
-RUN if [ -f requirements.txt ]; then \
-    pip3 install --user -r requirements.txt; \
-    fi && \
-    pip3 install --user streamlit
-
-COPY . .
-
-EXPOSE 8501
-
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
-
-CMD ["streamlit", "run", "app/Welcome.py", "--server.enableCORS", "false", "--server.enableXsrfProtection", "false", "--server.port", "8501", "--server.address", "0.0.0.0"]
+# run
+CMD ["python", "app.py"]

@@ -65,6 +65,14 @@ def predict(message, history,request: gr.Request):
         elif msg['role'] == "assistant":
             history_langchain_format.append(AIMessage(content=msg['content']))
     
+    # Send welcoming message
+    if not history:
+        welcome_msg = """Welcome! I’m **RemiBot**, your guide to Rémi Cazelles’,
+            projects, work, and education. Ask me anything about his career
+            or background, and I’ll pull the relevant info from the provided
+            documents."""
+        
+        return welcome_msg
 
     # Retrieve relevant documents for the current message
     relevant_docs = retriever.similarity_search(message,k=3)  # Your retriever
@@ -125,6 +133,7 @@ import gradio as gr
 iface = gr.ChatInterface(
     predict,
     api_name="chat",
+    description="Ask me anything about Rémi’s work, projects, or education. I’ll cite the source documents."
 )
 
 iface.launch()

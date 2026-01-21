@@ -15,12 +15,12 @@ llm = init_chat_model("gpt-5-nano",
 
 #%% load retreiver
 from agent.create_retreiver import load_vector_store
-retriever = load_vector_store("intfloat/e5-base-v2","data/FAISS/512-intfloat-e5-base-v2-2026-01-16")
+retriever = load_vector_store("intfloat/e5-base-v2","data/FAISS")
 
 
 #%% Include a rate limiter
 from agent.restrict_usage import RateLimiter
-limiter = RateLimiter(max_requests=10, window_minutes=60)
+limiter = RateLimiter(max_requests=5, window_minutes=60)
 
 #%% helper function
 def format_source(doc):
@@ -38,9 +38,12 @@ def format_source(doc):
     elif "https://" in source:
         return source
     elif "data" in source:
-        page_label = doc.metadata["pagpage_labele"]
-        total_page = doc.metadata["total_page"]
-        return f"{source.split('/')[-1]} page({page_label/total_page})"
+        try:
+            page_label = doc.metadata["page_label"]
+            total_page = doc.metadata["total_pages"]
+            return f"{source.split('/')[-1]} page({page_label/total_page})"
+        except:
+            return f"{source.split('/')[-1]}"
     
 #%% setup chatbot
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -53,7 +56,7 @@ def predict(message, history,request: gr.Request):
     client_ip = request.client.host
     if not limiter.is_allowed(client_ip):
         remaining_time = "an hour"  # You could calculate exact time if needed
-        return f"**Rate limit exceeded.** You've used your 10 requests per hour. Please try again in {remaining_time}."
+        return f"**Rate limit exceeded.** You've used your 5 requests per hour. Please try again in {remaining_time}.\n LinkedIn Profile : https://www.linkedin.com/in/rcaz33/"
     
     
     # Safeguard
@@ -84,15 +87,6 @@ def predict(message, history,request: gr.Request):
             history_langchain_format.append(HumanMessage(content=msg['content']))
         elif msg['role'] == "assistant":
             history_langchain_format.append(AIMessage(content=msg['content']))
-    
-    # Send welcoming message
-    if not history:
-        welcome_msg = """Welcome! I’m **RemiBot**, your guide to Rémi Cazelles’,
-            projects, work, and education. Ask me anything about his career
-            or background, and I’ll pull the relevant info from the provided
-            documents."""
-        
-        return welcome_msg
 
     # Retrieve relevant documents for the current message
     relevant_docs = retriever.similarity_search(message,k=3)  # Your retriever
@@ -132,8 +126,8 @@ def predict(message, history,request: gr.Request):
         }
     )
     
-    source_context = "\nSources:" + "\n".join([
-        f"{format_source(doc)}"
+    source_context = "\n\nSources:\n" + "\n".join([
+        f"{i+1} - {format_source(doc)}"
         for i, doc in enumerate(relevant_docs)])
     
     print(gpt_response.content )
@@ -156,7 +150,7 @@ iface = gr.ChatInterface(
     chatbot=gr.Chatbot(placeholder="Hello! This app can help answering question about Rémi Cazelles's projects, work and education."),
     description="Ask me anything about Rémi’s work, projects, or education. I’ll cite the source documents.",
     examples=["How many years of experience does Rémi have in python, what significant project did he work on?", 
-              "When did Rémi graduate from his doctorate, what was his reaserch topic about?", 
+              "When did Rémi graduate from his doctorate, what was his research topic about?", 
               "I have a project in DataENgineering using Microsoft Fabrics for data pipeline, how good is Rémi experience to join a team ASAP?"]
 )
 

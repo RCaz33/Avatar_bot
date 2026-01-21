@@ -40,7 +40,7 @@ def format_source(doc):
     elif "data" in source:
         page_label = doc.metadata["pagpage_labele"]
         total_page = doc.metadata["total_page"]
-        return f"{source.split("/")[-1]} page({page_label/total_page})"
+        return f"{source.split('/')[-1]} page({page_label/total_page})"
     
 #%% setup chatbot
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage

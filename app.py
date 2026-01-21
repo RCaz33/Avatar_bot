@@ -153,7 +153,11 @@ import gradio as gr
 iface = gr.ChatInterface(
     predict,
     api_name="chat",
-    description="Ask me anything about Rémi’s work, projects, or education. I’ll cite the source documents."
+    chatbot=gr.Chatbot(placeholder="Hello! This app can help answering question about Rémi Cazelles's projects, work and education."),
+    description="Ask me anything about Rémi’s work, projects, or education. I’ll cite the source documents.",
+    examples=["How many years of experience does Rémi have in python, what significant project did he work on?", 
+              "When did Rémi graduate from his doctorate, what was his reaserch topic about?", 
+              "I have a project in DataENgineering using Microsoft Fabrics for data pipeline, how good is Rémi experience to join a team ASAP?"]
 )
 
 iface.launch()

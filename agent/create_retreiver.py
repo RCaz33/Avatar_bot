@@ -1,3 +1,4 @@
+# Create embeddings with Langchain docs
 
 # load files 
 from langchain_community.document_loaders import FileSystemBlobLoader
@@ -273,7 +274,7 @@ if __name__ == "__main__":
         raise RuntimeError("Missing Azure connection settings in .env file.")
 
     vector_db_path = "data/FAISS"  
-    embeddings_size = 512
+    embeddings_size = 256
     embeddings_name = "intfloat/e5-base-v2"
 
     try:

@@ -1,3 +1,7 @@
+# Create embeddings with Langchain docs
+
+# torch
+import torch
 
 # load files 
 from langchain_community.document_loaders import FileSystemBlobLoader
@@ -172,11 +176,14 @@ def create_or_load_embeddings(
     Returns:
         The loaded or newly created ``FAISS`` vector store.
     """
-    # Create the embedding model
+    # Create the embedding model base on engine
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
     embedding_model = HuggingFaceEmbeddings(
         model_name=embedding_model_name,
         # multi_process=True,
-        model_kwargs={"device": "mps"},  # use mps (or cuda) for faster embeddings
+        model_kwargs={"device": device},  # use mps (or cuda) for faster embeddings
         encode_kwargs={"normalize_embeddings": True},
     )
 
@@ -207,10 +214,13 @@ def load_vector_store(embedding_model_name: str, vector_db_path: str) -> FAISS:
     Raises:
         Exception: If the store cannot be found/loaded.
     """
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
     embedding_model = HuggingFaceEmbeddings(
         model_name=embedding_model_name,
         # multi_process=True,
-        model_kwargs={"device": "mps"},
+        model_kwargs={"device": device},
         encode_kwargs={"normalize_embeddings": True},
     )
 
@@ -273,7 +283,7 @@ if __name__ == "__main__":
         raise RuntimeError("Missing Azure connection settings in .env file.")
 
     vector_db_path = "data/FAISS"  
-    embeddings_size = 512
+    embeddings_size = 256
     embeddings_name = "intfloat/e5-base-v2"
 
     try:

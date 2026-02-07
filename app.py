@@ -11,7 +11,8 @@ from langchain.chat_models import init_chat_model
 
 llm = init_chat_model("gpt-5-nano", 
                       model_provider="openai",
-                      api_key=os.environ['OPENAI_API_KEY'])
+                      api_key=os.environ['OPENAI_API_KEY'],
+                      temperature=1)
 
 
 #%% load retreiver
@@ -81,6 +82,21 @@ def predict(message, history,request: gr.Request):
         return "This app can only answer question about Rémi Cazelles's projects, work and education."
     print("passed the safeguard")
 
+    # Route: Check if RAG is needed
+    ROUTING_PROMPT = """Does this question require specific information about Rémi Cazelles's projects, work, or education details?
+    Answer ONLY 'RAG' if it needs specific facts/details, or 'CHAT' if it's a general greeting/chitchat.
+    Question: {message}"""
+
+    route_response = llm.invoke([HumanMessage(content=ROUTING_PROMPT.format(message=message))])
+
+    if "CHAT" in route_response.content:
+        # Simple chat response without RAG
+        messages = [SystemMessage(content="You are a helpful assistant providing information about Rémi Cazelles professional career. Keep responses brief and friendly.")]
+        messages.extend(history_langchain_format)
+        messages.append(HumanMessage(content=message))
+        response = llm.invoke(messages)
+        return response.content
+
     # Build conversation history
     history_langchain_format = []
     for msg in history:
@@ -138,9 +154,10 @@ def predict(message, history,request: gr.Request):
 
 
 #%% setup tracking
-os.environ["LANGSMITH_PROJECT"] = "Testing_POC"
+os.environ["LANGSMITH_PROJECT"] = "Test_avatar_bot"
 os.environ["LANGSMITH_TRACING"] = "true"
 os.environ["LANGSMITH_API_KEY"] = os.environ['LANGSMITH_API_KEY']
+os.environ["LANGSMITH_ENDPOINT"]="https://api.smith.langchain.com"
 
 #%% lauch gradio app
 import gradio as gr

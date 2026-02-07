@@ -15,3 +15,13 @@ license: mit
 ---
 
 An chatbot with rag for curriculum vitae
+
+Container
+
+local macos (arm64 mps)
+
+cloud cpu / docker actions
+during docker build, precise adm64
+reqs --extra-index-url https://download.pytorch.org/whl/cpu torch faiss-cpu
+
+cloud gpu

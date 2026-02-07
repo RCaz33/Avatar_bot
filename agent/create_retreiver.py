@@ -214,10 +214,13 @@ def load_vector_store(embedding_model_name: str, vector_db_path: str) -> FAISS:
     Raises:
         Exception: If the store cannot be found/loaded.
     """
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
     embedding_model = HuggingFaceEmbeddings(
         model_name=embedding_model_name,
         # multi_process=True,
-        model_kwargs={"device": "mps"},
+        model_kwargs={"device": device},
         encode_kwargs={"normalize_embeddings": True},
     )
 

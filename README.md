@@ -14,7 +14,11 @@ short_description: a bot that answer questions about professional projets
 license: mit
 ---
 
-An chatbot with rag for curriculum vitae
+# A chatbot with rag for curriculum vitae
+
+Because informations contained in the vector might be confidential, we prepare it locally, encrypt it with a key saved on azure keyvault and upload the encrypted vector store to blob.
+
+Now the running app iun container load the encrypted file and decrypt it with a call on azure so it can be use in the bot answering pipeline.
 
 Container
 

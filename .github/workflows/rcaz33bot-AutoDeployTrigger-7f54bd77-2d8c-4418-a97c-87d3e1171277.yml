@@ -1,0 +1,45 @@
+name: Trigger auto deployment for rcaz33bot
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ prod_ready ]
+    paths:
+    - '**'
+    - '.github/workflows/rcaz33bot-AutoDeployTrigger-7f54bd77-2d8c-4418-a97c-87d3e1171277.yml'
+
+  # Allow manual trigger 
+  workflow_dispatch:
+      
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.RCAZ33BOT_AZURE_CREDENTIALS }}
+
+      - name: Build and push container image to registry
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}/dockerfile
+          _dockerfilePathKey_: _dockerfilePath_
+          _targetLabelKey_: _targetLabel_
+          registryUrl: rcazregistry.azure.io
+          registryUsername: ${{ secrets.RCAZ33BOT_REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.RCAZ33BOT_REGISTRY_PASSWORD }}
+          containerAppName: rcaz33bot
+          resourceGroup: botavatar
+          imageToBuild: rcazregistry.azure.io/rcaz33bot:${{ github.sha }}
+          
+            
+
+     
+

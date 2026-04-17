@@ -224,11 +224,67 @@ def predict(message: str, history: Any, request: gr.Request):
 
 
 
+def route(message: str) -> str:
+    routing_prompt = (
+        "Does this question require specific information about Rémi Cazelles's projects, "
+        "work, or education details?\n"
+        "Answer ONLY 'RAG' if it needs specific facts/details, or 'CHAT' if it's a general "
+        "greeting/chitchat.\n"
+        f"Question: {message}"
+    )
+
+    resp = llm.invoke([HumanMessage(content=routing_prompt)])
+    content = (getattr(resp, "content", "") or "").strip().upper()
+
+    return "RAG" if content.startswith("RAG") else "CHAT"
 
 
+def predict(message: str, history: Any, request: gr.Request):
+    message = (message or "").strip()
+    if not message:
+        return ""
 
+    # Rate limit
+    client_ip = None
+    try:
+        client = getattr(request, "client", None)
+        client_ip = getattr(client, "host", None)
+    except Exception:
+        client_ip = None
 
+    if client_ip and not limiter.is_allowed(client_ip):
+        return (
+            f"**Rate limit exceeded.** You've used {limiter.max_requests} requests per hour. "
+            "Please try again in an hour.\n"
+            "LinkedIn Profile : https://www.linkedin.com/in/rcaz33/"
+        )
 
+    # Safeguard
+    if not safeguard(message):
+        return "This app can only answer questions about Rémi Cazelles's projects, work and education."
+
+    # Build history once (fixes the previous bug where CHAT branch used an undefined variable)
+    history_langchain = normalize_history(history, max_turns=6)
+
+    # Route
+    if route(message) == "CHAT":
+        messages = [
+            SystemMessage(
+                content=(
+                    "You are a helpful assistant providing information about Rémi Cazelles' professional "
+                    "career. Keep responses brief and friendly."
+                )
+            ),
+            *history_langchain,
+            HumanMessage(content=message),
+        ]
+        response = llm.invoke(messages)
+        return response.content
+
+    # RAG
+    top_k = int(os.getenv("RAG_TOP_K", "3"))
+    relevant_docs = retriever.similarity_search(message, k=top_k)
+    
     max_doc_chars = int(os.getenv("RAG_MAX_DOC_CHARS", "1800"))
     context_chunks = []
     for i, doc in enumerate(relevant_docs, start=1):

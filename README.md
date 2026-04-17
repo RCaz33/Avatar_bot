@@ -62,8 +62,10 @@ Docker Container
 
 - origin on git@hf.co:spaces named 'origin' --> main
 
-create PR on spaces
-git fetch origin refs/pr/17:pr/17
-git checkout pr/17
-makes change and commit
-git push origin pr/17:refs/pr/17
+        # create PR on spaces / make changes locally
+        git fetch origin refs/pr/17:pr/17
+        git checkout pr/17
+        # modify and commit
+        git push origin pr/17:refs/pr/17
+        # On Spaces go to "Community" tab
+        # find PR and publish then merge

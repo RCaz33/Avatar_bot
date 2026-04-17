@@ -129,6 +129,39 @@ def route(message: str) -> str:
     return "RAG" if content.startswith("RAG") else "CHAT"
 
 
+# reranker 
+from sentence_transformers import CrossEncoder
+import numpy as np
+import torch
+
+class ProductionReranker:
+    def __init__(self, model_name="jinaai/jina-reranker-v2-base-multilingual"):
+        self.model = CrossEncoder(
+            model_name,
+            max_length=512,
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+            trust_remote_code=True
+        )
+    
+    def rerank(self, query, documents, k=5):
+        # Extract text
+        doc_texts = [
+            doc.page_content if hasattr(doc, 'page_content') else str(doc) 
+            for doc in documents
+        ]
+        
+        # Score in batches for efficiency
+        pairs = [[query, doc] for doc in doc_texts]
+        scores = self.model.predict(pairs, batch_size=32)
+        
+        # Get top-k
+        top_indices = np.argsort(scores)[::-1][:k]
+        
+        # Return with scores
+        reranked = [(documents[i], float(scores[i])) for i in top_indices]
+        return [doc for doc, score in reranked]
+
+
 def predict(message: str, history: Any, request: gr.Request):
     message = (message or "").strip()
     if not message:
@@ -172,8 +205,29 @@ def predict(message: str, history: Any, request: gr.Request):
         return response.content
 
     # RAG
-    top_k = int(os.getenv("RAG_TOP_K", "3"))
+    print("retreive docs ...")
+    top_k = int(os.getenv("RAG_TOP_K", "20"))
     relevant_docs = retriever.similarity_search(message, k=top_k)
+
+    # reank docs
+    print("reranking ...")
+    RERANKER = ProductionReranker()
+    top_r = int(os.getenv("RAG_TOP_R", "10"))
+    relevant_docs = RERANKER.rerank(message, relevant_docs, k=top_r)
+
+    # Build context from retrieved documents
+    print("build context ...")
+    context = "\nExtracted documents:\n" + "\n".join([
+        f"Content document {i+1}: {doc.page_content}\n\n---"
+        for i, doc in enumerate(relevant_docs)
+    ])
+
+
+
+
+
+
+
 
     max_doc_chars = int(os.getenv("RAG_MAX_DOC_CHARS", "1800"))
     context_chunks = []

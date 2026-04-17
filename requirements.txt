@@ -3,13 +3,16 @@ torchvision
 torchaudio
 
 sentence-transformers
-faiss-cpu
+faiss-gpu
 
-langchain-core
-langchain
-langchain-community
-langchain-openai
-langchain-huggingface
+sentence-transformers>=2.5.0
+einops
+
+langchain-core==0.3.21
+langchain==0.3.8
+langchain-community==0.3.8
+langchain-openai==0.2.9
+langchain-huggingface==0.1.0
 
 gradio
 

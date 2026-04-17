@@ -1,19 +1,15 @@
-FROM python:3.12-slim AS builder
+FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
 
-# bard setup
-RUN apt-get update && apt-get install -y \
-    git git-lfs ffmpeg libsm6 libxext6 cmake rsync libgl1 curl \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python 3.10
+RUN apt-get update && apt-get install -y python3.10 python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 WORKDIR /app
-
-# install without gpu
-RUN pip install --no-cache-dir -U pip
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
-
-# run
-CMD ["python", "app.py"]
+COPY . .
+RUN pip install --no-cache-dir -r requirements.txt
+EXPOSE 7860
+ENV GRADIO_SERVER_NAME="0.0.0.0"
+CMD ["python3", "app.py"]

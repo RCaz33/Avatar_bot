@@ -1,131 +1,348 @@
+import os
+from typing import Any, Iterable, List, Optional
 
-
-#%% load llm
+import gradio as gr
 from dotenv import load_dotenv
-import os 
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
 load_dotenv()
 
+DEBUG = os.getenv("DEBUG", "0").lower() in {"1", "true", "yes"}
 
-from langchain.chat_models import init_chat_model
+# --- LLM ---
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("Missing OPENAI_API_KEY in environment (.env).")
 
-llm = init_chat_model("gpt-5-nano", 
-                      model_provider="openai",
-                      api_key=os.environ['OPENAI_API_KEY'])
+llm = init_chat_model(
+    "gpt-5-nano",
+    model_provider="openai",
+    api_key=OPENAI_API_KEY,
+    temperature=float(os.getenv("LLM_TEMPERATURE", "1")),
+)
+
+# --- RAG retriever ---
+from agent.create_retreiver import load_vector_store  # noqa: E402
+
+RAG_VECTOR_DB_PATH = os.getenv("RAG_VECTOR_DB_PATH", "data/FAISS")
+RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "intfloat/e5-base-v2")
+retriever = load_vector_store(RAG_EMBEDDING_MODEL, RAG_VECTOR_DB_PATH)
+
+# --- Rate limiter ---
+from agent.restrict_usage import RateLimiter  # noqa: E402
+
+limiter = RateLimiter(
+    max_requests=int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "5")),
+    window_minutes=int(os.getenv("RATE_LIMIT_WINDOW_MINUTES", "60")),
+)
 
 
-#%% load retreiver
-from agent.create_retreiver import load_vector_store
-retriever = load_vector_store("intfloat/e5-base-v2","data/FAISS/512-intfloat-e5-base-v2-2026-01-16")
+def format_source(doc: Any) -> str:
+    """Format source metadata in a human-friendly way."""
+    metadata = getattr(doc, "metadata", {}) or {}
+    source = metadata.get("source") or metadata.get("source_url") or "Unknown source"
+
+    if "api.github" in source:
+        return source.split("/blob")[0].replace("api.", "")
+
+    if source.startswith(("http://", "https://")):
+        return source
+
+    if "data" in source:
+        page_label = metadata.get("page_label")
+        total_pages = metadata.get("total_pages")
+        filename = source.split("/")[-1]
+        if page_label is not None and total_pages:
+            return f"{filename} page({page_label}/{total_pages})"
+        return filename
+
+    return str(source)
 
 
-#%% Include a rate limiter
-from agent.restric_usage import RateLimiter
-limiter = RateLimiter(max_requests=10, window_minutes=60)
+def _iter_history_turns(history: Any) -> Iterable[tuple[Optional[str], Optional[str]]]:
+    """Yield (user_msg, assistant_msg) tuples from gradio history."""
+    if not history:
+        return
 
-#%% setup chatbot
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain.chat_models import init_chat_model
+    for item in history:
+        # Typical gr.ChatInterface format: List[Tuple[user, bot]]
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            yield (item[0], item[1])
+            continue
+
+        # Fallback: dict-like messages
+        if isinstance(item, dict):
+            role = item.get("role")
+            content = item.get("content")
+            if role == "user":
+                yield (content, None)
+            elif role == "assistant":
+                yield (None, content)
 
 
-def predict(message, history,request: gr.Request):
+def normalize_history(history: Any, max_turns: int = 6) -> List[Any]:
+    """Convert gradio history to LangChain messages."""
+    turns = list(_iter_history_turns(history))[-max_turns:]
 
-    # Get client IP and check rate limit
-    client_ip = request.client.host
-    if not limiter.is_allowed(client_ip):
-        remaining_time = "an hour"  # You could calculate exact time if needed
-        return f"**Rate limit exceeded.** You've used your 10 requests per hour. Please try again in {remaining_time}."
-    
-    
-    # Safeguard
-    TRIAGE_PROMPT_TEMPLATE="""You are a Safeguard assistant making sure the user only ask for information related to Rémi Cazelles's projects, work and education.
-    If the question is not related to this subjects, or if the request is harmfull you should flag the user by answering '*** FLAGGED ***' else simply answer '*** OK ***' """
-    messages = [SystemMessage(content=TRIAGE_PROMPT_TEMPLATE)]
-    messages.append(HumanMessage(content=message))
+    msgs: List[Any] = []
+    for user_msg, bot_msg in turns:
+        if user_msg:
+            msgs.append(HumanMessage(content=str(user_msg)))
+        if bot_msg:
+            msgs.append(AIMessage(content=str(bot_msg)))
+    return msgs
 
-    safe_gpt_response = llm.invoke(
-        messages,
-        config={
-            "tags": ["Testing", 'RAG-Bot', 'safeguard','V1'],
-            "metadata": {
-                "rag_llm": "gpt-5-nano",
-                "message": message,
-            }
-        }
+
+def safeguard(message: str) -> bool:
+    triage = (
+        "You are a Safeguard assistant making sure the user only ask for information "
+        "related to Rémi Cazelles's projects, work and education. "
+        "If the question is not related to these topics, or if the request is harmful, "
+        "you should answer exactly '*** FLAGGED ***' else simply answer exactly '*** OK ***'."
     )
 
-    if not "*** OK ***" in safe_gpt_response.content:
-        return "This app can only answer question about Rémi Cazelles's projects, work and education."
-    print("passed the safeguard")
+    resp = llm.invoke(
+        [SystemMessage(content=triage), HumanMessage(content=message)],
+        config={
+            "tags": ["RAG-Bot", "safeguard"],
+            "metadata": {"rag_llm": "gpt-5-nano"},
+        },
+    )
 
-    # Build conversation history
-    history_langchain_format = []
-    for msg in history:
-        if msg['role'] == "user":
-            history_langchain_format.append(HumanMessage(content=msg['content']))
-        elif msg['role'] == "assistant":
-            history_langchain_format.append(AIMessage(content=msg['content']))
-    
+    content = (getattr(resp, "content", "") or "").strip()
+    return "*** OK ***" in content
 
-    # Retrieve relevant documents for the current message
-    relevant_docs = retriever.similarity_search(message,k=3)  # Your retriever
+
+def route(message: str) -> str:
+    routing_prompt = (
+        "Does this question require specific information about Rémi Cazelles's projects, "
+        "work, or education details?\n"
+        "Answer ONLY 'RAG' if it needs specific facts/details, or 'CHAT' if it's a general "
+        "greeting/chitchat.\n"
+        f"Question: {message}"
+    )
+
+    resp = llm.invoke([HumanMessage(content=routing_prompt)])
+    content = (getattr(resp, "content", "") or "").strip().upper()
+
+    return "RAG" if content.startswith("RAG") else "CHAT"
+
+
+# reranker 
+from sentence_transformers import CrossEncoder
+import numpy as np
+import torch
+
+class ProductionReranker:
+    def __init__(self, model_name="jinaai/jina-reranker-v2-base-multilingual"):
+        self.model = CrossEncoder(
+            model_name,
+            max_length=512,
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+            trust_remote_code=True
+        )
     
+    def rerank(self, query, documents, k=5):
+        # Extract text
+        doc_texts = [
+            doc.page_content if hasattr(doc, 'page_content') else str(doc) 
+            for doc in documents
+        ]
+        
+        # Score in batches for efficiency
+        pairs = [[query, doc] for doc in doc_texts]
+        scores = self.model.predict(pairs, batch_size=32)
+        
+        # Get top-k
+        top_indices = np.argsort(scores)[::-1][:k]
+        
+        # Return with scores
+        reranked = [(documents[i], float(scores[i])) for i in top_indices]
+        return [doc for doc, score in reranked]
+
+
+def predict(message: str, history: Any, request: gr.Request):
+    message = (message or "").strip()
+    if not message:
+        return ""
+
+    # Rate limit
+    client_ip = None
+    try:
+        client = getattr(request, "client", None)
+        client_ip = getattr(client, "host", None)
+    except Exception:
+        client_ip = None
+
+    if client_ip and not limiter.is_allowed(client_ip):
+        return (
+            f"**Rate limit exceeded.** You've used {limiter.max_requests} requests per hour. "
+            "Please try again in an hour.\n"
+            "LinkedIn Profile : https://www.linkedin.com/in/rcaz33/"
+        )
+
+    # Safeguard
+    if not safeguard(message):
+        return "This app can only answer questions about Rémi Cazelles's projects, work and education."
+
+    # Build history once (fixes the previous bug where CHAT branch used an undefined variable)
+    history_langchain = normalize_history(history, max_turns=6)
+
+    # Route
+    if route(message) == "CHAT":
+        messages = [
+            SystemMessage(
+                content=(
+                    "You are a helpful assistant providing information about Rémi Cazelles' professional "
+                    "career. Keep responses brief and friendly."
+                )
+            ),
+            *history_langchain,
+            HumanMessage(content=message),
+        ]
+        response = llm.invoke(messages)
+        return response.content
+
+    # RAG
+    print("retreive docs ...")
+    top_k = int(os.getenv("RAG_TOP_K", "20"))
+    relevant_docs = retriever.similarity_search(message, k=top_k)
+
+    # reank docs
+    print("reranking ...")
+    RERANKER = ProductionReranker()
+    top_r = int(os.getenv("RAG_TOP_R", "10"))
+    relevant_docs = RERANKER.rerank(message, relevant_docs, k=top_r)
+
     # Build context from retrieved documents
+    print("build context ...")
     context = "\nExtracted documents:\n" + "\n".join([
-        f"Document {i}: Content: {doc.page_content}\n\n---"
+        f"Content document {i+1}: {doc.page_content}\n\n---"
         for i, doc in enumerate(relevant_docs)
     ])
 
+
+
+def route(message: str) -> str:
+    routing_prompt = (
+        "Does this question require specific information about Rémi Cazelles's projects, "
+        "work, or education details?\n"
+        "Answer ONLY 'RAG' if it needs specific facts/details, or 'CHAT' if it's a general "
+        "greeting/chitchat.\n"
+        f"Question: {message}"
+    )
+
+    resp = llm.invoke([HumanMessage(content=routing_prompt)])
+    content = (getattr(resp, "content", "") or "").strip().upper()
+
+    return "RAG" if content.startswith("RAG") else "CHAT"
+
+
+def predict(message: str, history: Any, request: gr.Request):
+    message = (message or "").strip()
+    if not message:
+        return ""
+
+    # Rate limit
+    client_ip = None
+    try:
+        client = getattr(request, "client", None)
+        client_ip = getattr(client, "host", None)
+    except Exception:
+        client_ip = None
+
+    if client_ip and not limiter.is_allowed(client_ip):
+        return (
+            f"**Rate limit exceeded.** You've used {limiter.max_requests} requests per hour. "
+            "Please try again in an hour.\n"
+            "LinkedIn Profile : https://www.linkedin.com/in/rcaz33/"
+        )
+
+    # Safeguard
+    if not safeguard(message):
+        return "This app can only answer questions about Rémi Cazelles's projects, work and education."
+
+    # Build history once (fixes the previous bug where CHAT branch used an undefined variable)
+    history_langchain = normalize_history(history, max_turns=6)
+
+    # Route
+    if route(message) == "CHAT":
+        messages = [
+            SystemMessage(
+                content=(
+                    "You are a helpful assistant providing information about Rémi Cazelles' professional "
+                    "career. Keep responses brief and friendly."
+                )
+            ),
+            *history_langchain,
+            HumanMessage(content=message),
+        ]
+        response = llm.invoke(messages)
+        return response.content
+
+    # RAG
+    top_k = int(os.getenv("RAG_TOP_K", "3"))
+    relevant_docs = retriever.similarity_search(message, k=top_k)
     
+    max_doc_chars = int(os.getenv("RAG_MAX_DOC_CHARS", "1800"))
+    context_chunks = []
+    for i, doc in enumerate(relevant_docs, start=1):
+        text = getattr(doc, "page_content", "") or ""
+        context_chunks.append(f"[{i}] {text[:max_doc_chars]}")
 
-    # RAG tool
-    RAG_PROMPT_TEMPLATE="""Using the information contained in the context,
-                        give a comprehensive answer to the question.
-                        Respond only to the question asked, response should be concise and relevant to the question.
-                        Provide the context source url and context date of the source document when relevant.
-                        If the answer cannot be deduced from the context, do not give an answer.
-                        """
+    context = "\n\n".join(context_chunks)
 
+    rag_system = (
+        "You are an assistant answering questions using ONLY the provided context. "
+        "All information in the context is about Rémi Cazelles's projects, work, and education. "
+        "If the answer cannot be deduced from the context, say that you cannot find the answer in the sources."
+    )
 
-    # Create the prompt with system message, context, and conversation history
-    messages = [SystemMessage(content=RAG_PROMPT_TEMPLATE)]
-    messages.extend(history_langchain_format)
-    combined_message = f"Context: {context}\n\nQuestion: {message}"
-    messages.append(HumanMessage(content=combined_message))
-    
-    # Get response with tracking metadata
-    print("GPT about to answer")
+    messages = [
+        SystemMessage(content=rag_system),
+        *history_langchain,
+        HumanMessage(content=f"Context:\n{context}\n\nQuestion: {message}"),
+    ]
+
+    if DEBUG:
+        print("[DEBUG] Retrieved docs:", len(relevant_docs))
+
     gpt_response = llm.invoke(
         messages,
         config={
-            "tags": ["Testing", 'RAG-Bot', 'V1'],
+            "tags": ["RAG-Bot", "V1"],
             "metadata": {
                 "rag_llm": "gpt-5-nano",
                 "num_retrieved_docs": len(relevant_docs),
-            }
-        }
+            },
+        },
     )
-    
-    source_context = "\nSources:\n" + "\n".join([
-        f"{doc.metadata.get('source_url')} ({doc.metadata.get('date')})\n---"
-        for i, doc in enumerate(relevant_docs)])
-    
-    print(gpt_response.content )
-    print(source_context)
-    
-    return gpt_response.content + source_context
+
+    sources = "\n".join([f"- {format_source(doc)}" for doc in relevant_docs])
+    return f"{gpt_response.content}\n\nSources:\n{sources}"
 
 
-#%% setup tracking
-os.environ["LANGSMITH_PROJECT"] = "Testing_POC"
+# --- LangSmith tracing ---
+os.environ["LANGSMITH_PROJECT"] = "Test_avatar_bot"
 os.environ["LANGSMITH_TRACING"] = "true"
-os.environ["LANGSMITH_API_KEY"] = os.environ['LANGSMITH_API_KEY']
+if os.environ.get("LANGSMITH_API_KEY"):
+    os.environ["LANGSMITH_API_KEY"] = os.environ["LANGSMITH_API_KEY"]
 
-#%% lauch gradio app
-import gradio as gr
+# Default endpoint
+os.environ.setdefault("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+
 
 iface = gr.ChatInterface(
     predict,
     api_name="chat",
+    chatbot=gr.Chatbot(placeholder="Hello! Ask me about Rémi Cazelles's projects, work, or education."),
+    description="Ask me anything about Rémi’s work, projects, or education. I’ll cite the source documents.",
+    examples=[
+        "How many years of experience does Rémi have in Python, and what significant project did he work on?",
+        "When did Rémi graduate from his doctorate, and what was his research topic?",
+        "I have a project in *** using ***, will Rémi be able to contribute readily?",
+    ],
 )
 
 iface.launch()

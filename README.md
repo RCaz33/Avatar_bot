@@ -20,12 +20,35 @@ Because informations contained in the vector might be confidential, we prepare i
 
 Now the running app iun container load the encrypted file and decrypt it with a call on azure so it can be use in the bot answering pipeline.
 
-Container
+Docker Container
+- run local macos (arm64 mps)
+- run cloud cpu / docker actions
+        during docker build, precise adm64
+        reqs --extra-index-url https://download.pytorch.org/whl/cpu torch faiss-cpu
 
-local macos (arm64 mps)
+- run cloud gpu, use cuda image and precise amd64
 
-cloud cpu / docker actions
-during docker build, precise adm64
-reqs --extra-index-url https://download.pytorch.org/whl/cpu torch faiss-cpu
 
-cloud gpu
+# Branching strategy
+- origin on git@github.com --> prod ready
+
+        # make modif
+        git checkout -b feature
+        git add a b c
+        git commit -m "why and how this feature"
+        # health chek
+        git checkout main
+        git pull origin main
+        git checkout feature-xyz
+        git merge main
+        # push on hub
+        git push origin feature
+        on github: create pull request
+
+- origin on git@hf.co:spaces --> main
+
+create PR on spaces
+git fetch origin refs/pr/17:pr/17
+git checkout pr/17
+makes change and commit
+git push origin pr/17:refs/pr/17
